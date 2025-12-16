@@ -13,4 +13,3 @@ Strengths include proper backend architecture, JWT authentication,
 and Dockerized deployment.
 
 Challenges included JWT setup and frontend-backend integration.
-Given more time, UI polish and user accounts would be added.
