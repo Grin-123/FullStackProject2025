@@ -13,21 +13,27 @@ import {
 import axios from "axios";
 import { Picker } from "@react-native-picker/picker";
 
-// IMPORTANT:
-// - Android Emulator: http://10.0.2.2:8000
-// - iOS Simulator: http://localhost:8000
-// - Real phone: http://<your-pc-ip>:8000
-const API = Platform.OS === "android" ? "http://10.0.2.2:8000" : "http://localhost:8000";
+/**
+ * API URL
+ * - Android Emulator: http://10.0.2.2:8000
+ * - Expo Web / Browser: http://localhost:8000
+ */
+const API =
+  Platform.OS === "android"
+    ? "http://10.0.2.2:8000"
+    : "http://localhost:8000";
 
 const CATEGORIES = ["Food", "Rent", "Transport", "Salary", "Bills", "Other"];
+
+/* ---------- Small UI helpers (Radio + Checkbox) ---------- */
 
 function Radio({ label, selected, onPress }) {
   return (
     <Pressable onPress={onPress} style={styles.radioRow}>
-      <View style={[styles.radioOuter, selected && styles.radioOuterSelected]}>
-        {selected ? <View style={styles.radioInner} /> : null}
+      <View style={styles.radioOuter}>
+        {selected && <View style={styles.radioInner} />}
       </View>
-      <Text style={styles.radioLabel}>{label}</Text>
+      <Text>{label}</Text>
     </Pressable>
   );
 }
@@ -35,243 +41,223 @@ function Radio({ label, selected, onPress }) {
 function Checkbox({ label, checked, onToggle }) {
   return (
     <Pressable onPress={onToggle} style={styles.checkboxRow}>
-      <View style={[styles.checkboxBox, checked && styles.checkboxBoxChecked]}>
-        {checked ? <Text style={styles.checkboxTick}>✓</Text> : null}
+      <View style={styles.checkboxBox}>
+        {checked && <Text style={styles.checkboxTick}>✓</Text>}
       </View>
-      <Text style={styles.checkboxLabel}>{label}</Text>
+      <Text>{label}</Text>
     </Pressable>
   );
 }
 
+/* -------------------- APP -------------------- */
+
 export default function App() {
+  const [transactions, setTransactions] = useState([]);
   const [token, setToken] = useState("");
 
-  // login fields
+  // Login
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("password");
 
-  // transaction fields
+  // Form
   const [title, setTitle] = useState("");
   const [amount, setAmount] = useState("");
-  const [transactionType, setTransactionType] = useState("income"); // radio
+  const [type, setType] = useState("income"); // radio
   const [category, setCategory] = useState(CATEGORIES[0]); // dropdown
   const [includeArchived, setIncludeArchived] = useState(false); // checkbox
 
-  const [transactions, setTransactions] = useState([]);
+  const authHeaders = useMemo(
+    () => (token ? { Authorization: `Bearer ${token}` } : {}),
+    [token]
+  );
 
-  const authHeaders = useMemo(() => {
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  }, [token]);
+  /* ---------- API calls ---------- */
 
   const fetchTransactions = async () => {
-    try {
-      const res = await axios.get(`${API}/transactions?include_archived=${includeArchived}`);
-      setTransactions(res.data);
-    } catch (e) {
-      Alert.alert("Error", "Failed to load transactions. Is backend running?");
+    const res = await axios.get(
+      `${API}/transactions?include_archived=${includeArchived}`
+    );
+    setTransactions(res.data);
+  };
+
+  const login = async () => {
+    const form = new URLSearchParams();
+    form.append("username", username);
+    form.append("password", password);
+
+    const res = await axios.post(`${API}/token`, form.toString(), {
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    });
+
+    setToken(res.data.access_token);
+    Alert.alert("Login", "JWT token saved");
+  };
+
+  const addTransaction = async () => {
+    if (!title || !amount) {
+      Alert.alert("Validation", "Title and amount required");
+      return;
     }
+
+    await axios.post(`${API}/transactions`, {
+      title,
+      amount: Number(amount),
+      transaction_type: type,
+      category,
+      transaction_date: new Date().toISOString().split("T")[0],
+      archived: false,
+    });
+
+    setTitle("");
+    setAmount("");
+    fetchTransactions();
+  };
+
+  const archiveTransaction = async (id) => {
+    if (!token) return Alert.alert("Login required");
+    await axios.patch(
+      `${API}/transactions/${id}/archive`,
+      {},
+      { headers: authHeaders }
+    );
+    fetchTransactions();
+  };
+
+  const deleteTransaction = async (id) => {
+    if (!token) return Alert.alert("Login required");
+    await axios.delete(`${API}/transactions/${id}`, {
+      headers: authHeaders,
+    });
+    fetchTransactions();
   };
 
   useEffect(() => {
     fetchTransactions();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [includeArchived]);
 
-  const login = async () => {
-    try {
-      const form = new URLSearchParams();
-      form.append("username", username);
-      form.append("password", password);
-
-      const res = await axios.post(`${API}/token`, form.toString(), {
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      });
-
-      setToken(res.data.access_token);
-      Alert.alert("Login", "Token saved ✅");
-    } catch (e) {
-      setToken("");
-      Alert.alert("Login failed", "Use username: admin and password: password");
-    }
-  };
-
-  const addTransaction = async () => {
-    const amt = Number(amount);
-    if (!title.trim()) return Alert.alert("Validation", "Title is required");
-    if (!Number.isFinite(amt) || amt < 0) return Alert.alert("Validation", "Amount must be a number >= 0");
-
-    try {
-      const today = new Date().toISOString().split("T")[0];
-      await axios.post(`${API}/transactions`, {
-        title: title.trim(),
-        amount: amt,
-        transaction_type: transactionType,
-        category,
-        transaction_date: today,
-        archived: false,
-      });
-
-      setTitle("");
-      setAmount("");
-      fetchTransactions();
-    } catch (e) {
-      Alert.alert("Error", "Failed to add transaction.");
-    }
-  };
-
-  const archiveTransaction = async (id) => {
-    if (!token) return Alert.alert("Auth required", "Login first to archive.");
-    try {
-      await axios.patch(`${API}/transactions/${id}/archive`, {}, { headers: authHeaders });
-      fetchTransactions();
-    } catch (e) {
-      Alert.alert("Error", "Archive failed. Are you logged in?");
-    }
-  };
-
-  const deleteTransaction = async (id) => {
-    if (!token) return Alert.alert("Auth required", "Login first to delete.");
-    Alert.alert("Confirm", "Delete this transaction permanently?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            await axios.delete(`${API}/transactions/${id}`, { headers: authHeaders });
-            fetchTransactions();
-          } catch (e) {
-            Alert.alert("Error", "Delete failed. Are you logged in?");
-          }
-        },
-      },
-    ]);
-  };
+  /* ---------- UI ---------- */
 
   return (
     <View style={styles.container}>
-      <Text style={styles.h1}>Personal Finance Tracker</Text>
-      <Text style={styles.small}>API: {API}</Text>
+      <Text style={styles.title}>Personal Finance Tracker</Text>
 
-      {/* LOGIN (Textboxes + Button) */}
+      {/* LOGIN */}
       <View style={styles.card}>
-        <Text style={styles.h2}>Login (JWT)</Text>
-        <TextInput style={styles.input} value={username} onChangeText={setUsername} placeholder="Username" />
+        <Text style={styles.subtitle}>Login (JWT)</Text>
         <TextInput
           style={styles.input}
-          value={password}
-          onChangeText={setPassword}
+          placeholder="Username"
+          value={username}
+          onChangeText={setUsername}
+        />
+        <TextInput
+          style={styles.input}
           placeholder="Password"
           secureTextEntry
+          value={password}
+          onChangeText={setPassword}
         />
-        <Button title="Login (Get Token)" onPress={login} />
-        <Text style={styles.small}>Token: {token ? "Saved ✅" : "Not logged in ❌"}</Text>
+        <Button title="Login" onPress={login} />
+        <Text>{token ? "Token saved ✅" : "Not logged in ❌"}</Text>
       </View>
 
-      {/* CREATE FORM */}
+      {/* ADD TRANSACTION */}
       <View style={styles.card}>
-        <Text style={styles.h2}>Add Transaction</Text>
+        <Text style={styles.subtitle}>Add Transaction</Text>
 
-        <TextInput style={styles.input} value={title} onChangeText={setTitle} placeholder="Title (e.g., Lunch)" />
         <TextInput
           style={styles.input}
-          value={amount}
-          onChangeText={setAmount}
-          placeholder="Amount (e.g., 1200)"
-          keyboardType="numeric"
+          placeholder="Title"
+          value={title}
+          onChangeText={setTitle}
         />
 
-        {/* RADIO BUTTONS */}
-        <Text style={styles.label}>Type</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Amount"
+          keyboardType="numeric"
+          value={amount}
+          onChangeText={setAmount}
+        />
+
+        {/* Radio Buttons */}
+        <Text>Type</Text>
         <View style={styles.row}>
-          <Radio
-            label="Income"
-            selected={transactionType === "income"}
-            onPress={() => setTransactionType("income")}
-          />
-          <Radio
-            label="Expense"
-            selected={transactionType === "expense"}
-            onPress={() => setTransactionType("expense")}
-          />
+          <Radio label="Income" selected={type === "income"} onPress={() => setType("income")} />
+          <Radio label="Expense" selected={type === "expense"} onPress={() => setType("expense")} />
         </View>
 
-        {/* DROPDOWN */}
-        <Text style={styles.label}>Category</Text>
-        <View style={styles.pickerWrap}>
-          <Picker selectedValue={category} onValueChange={(v) => setCategory(v)}>
-            {CATEGORIES.map((c) => (
-              <Picker.Item key={c} label={c} value={c} />
-            ))}
-          </Picker>
-        </View>
+        {/* Dropdown */}
+        <Text>Category</Text>
+        <Picker selectedValue={category} onValueChange={setCategory}>
+          {CATEGORIES.map((c) => (
+            <Picker.Item key={c} label={c} value={c} />
+          ))}
+        </Picker>
 
         <Button title="Add" onPress={addTransaction} />
       </View>
 
-      {/* CHECKBOX (meaningful filter) */}
-      <View style={styles.card}>
-        <Checkbox
-          label="Include archived transactions"
-          checked={includeArchived}
-          onToggle={() => setIncludeArchived((v) => !v)}
-        />
-        <Button title="Refresh List" onPress={fetchTransactions} />
-      </View>
+      {/* Checkbox */}
+      <Checkbox
+        label="Include archived"
+        checked={includeArchived}
+        onToggle={() => setIncludeArchived(!includeArchived)}
+      />
 
       {/* LIST */}
-      <Text style={styles.h2}>Transactions</Text>
       <FlatList
         data={transactions}
-        keyExtractor={(item) => String(item.id)}
+        keyExtractor={(item) => item.id.toString()}
         renderItem={({ item }) => (
           <View style={styles.item}>
-            <Text style={styles.itemTitle}>
-              {item.title} — ${item.amount} ({item.transaction_type})
+            <Text>
+              {item.title} - ${item.amount} ({item.transaction_type})
             </Text>
-            <Text style={styles.small}>
-              {item.category} • {item.transaction_date} • {item.archived ? "ARCHIVED" : "ACTIVE"}
-            </Text>
+            <Text>{item.category}</Text>
 
             <View style={styles.row}>
-              <View style={styles.btn}>
-                <Button title="Archive" onPress={() => archiveTransaction(item.id)} />
-              </View>
-              <View style={styles.btn}>
-                <Button title="Delete" onPress={() => deleteTransaction(item.id)} />
-              </View>
+              <Button title="Archive" onPress={() => archiveTransaction(item.id)} />
+              <Button title="Delete" onPress={() => deleteTransaction(item.id)} />
             </View>
           </View>
         )}
-        ListEmptyComponent={<Text style={styles.small}>No transactions yet.</Text>}
       />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { padding: 18, paddingTop: 40 },
-  h1: { fontSize: 22, fontWeight: "700", marginBottom: 6 },
-  h2: { fontSize: 16, fontWeight: "700", marginBottom: 8 },
-  small: { fontSize: 12, opacity: 0.8, marginTop: 6 },
-  label: { marginTop: 10, marginBottom: 6, fontWeight: "600" },
-  card: { padding: 12, borderWidth: 1, borderRadius: 10, marginBottom: 12 },
-  input: { borderWidth: 1, padding: 10, borderRadius: 8, marginBottom: 10 },
-  pickerWrap: { borderWidth: 1, borderRadius: 8, overflow: "hidden", marginBottom: 10 },
-  item: { padding: 12, borderWidth: 1, borderRadius: 10, marginBottom: 10 },
-  itemTitle: { fontWeight: "700" },
-  row: { flexDirection: "row", alignItems: "center", gap: 12 },
-  btn: { flex: 1 },
+/* -------------------- STYLES -------------------- */
 
-  radioRow: { flexDirection: "row", alignItems: "center", marginRight: 12 },
-  radioOuter: { width: 20, height: 20, borderWidth: 2, borderRadius: 10, marginRight: 8 },
-  radioOuterSelected: {},
-  radioInner: { width: 10, height: 10, borderRadius: 5, margin: 3, backgroundColor: "black" },
-  radioLabel: { fontSize: 14 },
+const styles = StyleSheet.create({
+  container: { padding: 20, paddingTop: 40 },
+  title: { fontSize: 22, fontWeight: "bold", marginBottom: 10 },
+  subtitle: { fontSize: 16, fontWeight: "bold", marginBottom: 8 },
+  card: { borderWidth: 1, padding: 10, marginBottom: 12, borderRadius: 8 },
+  input: { borderWidth: 1, padding: 8, marginBottom: 8, borderRadius: 6 },
+  item: { borderWidth: 1, padding: 10, marginBottom: 8, borderRadius: 6 },
+  row: { flexDirection: "row", gap: 10, marginBottom: 6 },
+
+  radioRow: { flexDirection: "row", alignItems: "center", marginRight: 10 },
+  radioOuter: {
+    width: 18,
+    height: 18,
+    borderWidth: 2,
+    borderRadius: 9,
+    marginRight: 6,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  radioInner: { width: 8, height: 8, borderRadius: 4, backgroundColor: "black" },
 
   checkboxRow: { flexDirection: "row", alignItems: "center", marginBottom: 10 },
-  checkboxBox: { width: 22, height: 22, borderWidth: 2, marginRight: 10, alignItems: "center", justifyContent: "center" },
-  checkboxBoxChecked: {},
-  checkboxTick: { fontWeight: "900" },
-  checkboxLabel: { fontSize: 14 },
+  checkboxBox: {
+    width: 20,
+    height: 20,
+    borderWidth: 2,
+    marginRight: 8,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  checkboxTick: { fontWeight: "bold" },
 });
