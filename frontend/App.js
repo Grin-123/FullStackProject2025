@@ -3,21 +3,18 @@ import {
   View,
   Text,
   TextInput,
-  Button,
-  FlatList,
   Pressable,
+  FlatList,
   Alert,
   Platform,
   StyleSheet,
+  SafeAreaView,
+  ScrollView,
 } from "react-native";
 import axios from "axios";
 import { Picker } from "@react-native-picker/picker";
+import Checkbox from "expo-checkbox";
 
-/**
- * API URL
- * - Android Emulator: http://10.0.2.2:8000
- * - Expo Web / Browser: http://localhost:8000
- */
 const API =
   Platform.OS === "android"
     ? "http://10.0.2.2:8000"
@@ -25,239 +22,414 @@ const API =
 
 const CATEGORIES = ["Food", "Rent", "Transport", "Salary", "Bills", "Other"];
 
-/* ---------- Small UI helpers (Radio + Checkbox) ---------- */
-
-function Radio({ label, selected, onPress }) {
+function PillButton({ label, onPress, variant = "primary", disabled }) {
   return (
-    <Pressable onPress={onPress} style={styles.radioRow}>
-      <View style={styles.radioOuter}>
-        {selected && <View style={styles.radioInner} />}
-      </View>
-      <Text>{label}</Text>
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      style={({ pressed }) => [
+        styles.btn,
+        variant === "primary" && styles.btnPrimary,
+        variant === "danger" && styles.btnDanger,
+        variant === "ghost" && styles.btnGhost,
+        disabled && { opacity: 0.5 },
+        pressed && !disabled && { opacity: 0.85 },
+      ]}
+    >
+      <Text
+        style={[
+          styles.btnText,
+          variant === "ghost" ? styles.btnTextGhost : styles.btnTextSolid,
+        ]}
+      >
+        {label}
+      </Text>
     </Pressable>
   );
 }
 
-function Checkbox({ label, checked, onToggle }) {
+function RadioRow({ value, selected, onSelect }) {
   return (
-    <Pressable onPress={onToggle} style={styles.checkboxRow}>
-      <View style={styles.checkboxBox}>
-        {checked && <Text style={styles.checkboxTick}>✓</Text>}
-      </View>
-      <Text>{label}</Text>
-    </Pressable>
+    <View style={styles.radioRow}>
+      {["income", "expense"].map((opt) => {
+        const isOn = selected === opt;
+        return (
+          <Pressable
+            key={opt}
+            onPress={() => onSelect(opt)}
+            style={[styles.radioChip, isOn && styles.radioChipOn]}
+          >
+            <Text style={[styles.radioText, isOn && styles.radioTextOn]}>
+              {opt === "income" ? "Income" : "Expense"}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
-
-/* -------------------- APP -------------------- */
 
 export default function App() {
-  const [transactions, setTransactions] = useState([]);
   const [token, setToken] = useState("");
 
-  // Login
+  // login
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("password");
 
-  // Form
+  // form
   const [title, setTitle] = useState("");
   const [amount, setAmount] = useState("");
-  const [type, setType] = useState("income"); // radio
+  const [transactionType, setTransactionType] = useState("income"); // radio
   const [category, setCategory] = useState(CATEGORIES[0]); // dropdown
   const [includeArchived, setIncludeArchived] = useState(false); // checkbox
+
+  const [transactions, setTransactions] = useState([]);
 
   const authHeaders = useMemo(
     () => (token ? { Authorization: `Bearer ${token}` } : {}),
     [token]
   );
 
-  /* ---------- API calls ---------- */
-
   const fetchTransactions = async () => {
-    const res = await axios.get(
-      `${API}/transactions?include_archived=${includeArchived}`
-    );
-    setTransactions(res.data);
-  };
-
-  const login = async () => {
-    const form = new URLSearchParams();
-    form.append("username", username);
-    form.append("password", password);
-
-    const res = await axios.post(`${API}/token`, form.toString(), {
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    });
-
-    setToken(res.data.access_token);
-    Alert.alert("Login", "JWT token saved");
-  };
-
-  const addTransaction = async () => {
-    if (!title || !amount) {
-      Alert.alert("Validation", "Title and amount required");
-      return;
+    try {
+      const res = await axios.get(
+        `${API}/transactions?include_archived=${includeArchived}`
+      );
+      setTransactions(res.data);
+    } catch {
+      Alert.alert("Backend not reachable", `Check API: ${API}\nIs Docker running?`);
     }
-
-    await axios.post(`${API}/transactions`, {
-      title,
-      amount: Number(amount),
-      transaction_type: type,
-      category,
-      transaction_date: new Date().toISOString().split("T")[0],
-      archived: false,
-    });
-
-    setTitle("");
-    setAmount("");
-    fetchTransactions();
-  };
-
-  const archiveTransaction = async (id) => {
-    if (!token) return Alert.alert("Login required");
-    await axios.patch(
-      `${API}/transactions/${id}/archive`,
-      {},
-      { headers: authHeaders }
-    );
-    fetchTransactions();
-  };
-
-  const deleteTransaction = async (id) => {
-    if (!token) return Alert.alert("Login required");
-    await axios.delete(`${API}/transactions/${id}`, {
-      headers: authHeaders,
-    });
-    fetchTransactions();
   };
 
   useEffect(() => {
     fetchTransactions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [includeArchived]);
 
-  /* ---------- UI ---------- */
+  const login = async () => {
+    try {
+      const form = new URLSearchParams();
+      form.append("username", username);
+      form.append("password", password);
+
+      const res = await axios.post(`${API}/token`, form.toString(), {
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      });
+
+      setToken(res.data.access_token);
+      Alert.alert("Logged in", "JWT token saved ✅");
+    } catch {
+      setToken("");
+      Alert.alert("Login failed", "Use admin / password");
+    }
+  };
+
+  const addTransaction = async () => {
+    const amt = Number(amount);
+
+    if (!title.trim()) return Alert.alert("Validation", "Title is required");
+    if (!Number.isFinite(amt) || amt < 0)
+      return Alert.alert("Validation", "Amount must be a number >= 0");
+
+    try {
+      const today = new Date().toISOString().split("T")[0];
+      await axios.post(`${API}/transactions`, {
+        title: title.trim(),
+        amount: amt,
+        transaction_type: transactionType,
+        category,
+        transaction_date: today,
+        archived: false,
+      });
+
+      setTitle("");
+      setAmount("");
+      fetchTransactions();
+    } catch {
+      Alert.alert("Error", "Could not add transaction");
+    }
+  };
+
+  const archiveTransaction = async (id) => {
+    if (!token) return Alert.alert("Auth required", "Login first to archive");
+    try {
+      await axios.patch(`${API}/transactions/${id}/archive`, {}, { headers: authHeaders });
+      fetchTransactions();
+    } catch {
+      Alert.alert("Error", "Archive failed");
+    }
+  };
+
+  const deleteTransaction = async (id) => {
+    if (!token) return Alert.alert("Auth required", "Login first to delete");
+
+    Alert.alert("Confirm delete", "This is permanent. Continue?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await axios.delete(`${API}/transactions/${id}`, { headers: authHeaders });
+            fetchTransactions();
+          } catch {
+            Alert.alert("Error", "Delete failed");
+          }
+        },
+      },
+    ]);
+  };
+
+  const summary = useMemo(() => {
+    const active = transactions.filter((t) => !t.archived);
+    const income = active
+      .filter((t) => t.transaction_type === "income")
+      .reduce((s, t) => s + Number(t.amount || 0), 0);
+    const expense = active
+      .filter((t) => t.transaction_type === "expense")
+      .reduce((s, t) => s + Number(t.amount || 0), 0);
+    const balance = income - expense;
+    return { income, expense, balance };
+  }, [transactions]);
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Personal Finance Tracker</Text>
+    <SafeAreaView style={styles.safe}>
+      <ScrollView contentContainerStyle={styles.container}>
+        <Text style={styles.h1}>Personal Finance Tracker</Text>
+        <Text style={styles.sub}>API: {API}</Text>
 
-      {/* LOGIN */}
-      <View style={styles.card}>
-        <Text style={styles.subtitle}>Login (JWT)</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Username"
-          value={username}
-          onChangeText={setUsername}
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Password"
-          secureTextEntry
-          value={password}
-          onChangeText={setPassword}
-        />
-        <Button title="Login" onPress={login} />
-        <Text>{token ? "Token saved ✅" : "Not logged in ❌"}</Text>
-      </View>
-
-      {/* ADD TRANSACTION */}
-      <View style={styles.card}>
-        <Text style={styles.subtitle}>Add Transaction</Text>
-
-        <TextInput
-          style={styles.input}
-          placeholder="Title"
-          value={title}
-          onChangeText={setTitle}
-        />
-
-        <TextInput
-          style={styles.input}
-          placeholder="Amount"
-          keyboardType="numeric"
-          value={amount}
-          onChangeText={setAmount}
-        />
-
-        {/* Radio Buttons */}
-        <Text>Type</Text>
-        <View style={styles.row}>
-          <Radio label="Income" selected={type === "income"} onPress={() => setType("income")} />
-          <Radio label="Expense" selected={type === "expense"} onPress={() => setType("expense")} />
-        </View>
-
-        {/* Dropdown */}
-        <Text>Category</Text>
-        <Picker selectedValue={category} onValueChange={setCategory}>
-          {CATEGORIES.map((c) => (
-            <Picker.Item key={c} label={c} value={c} />
-          ))}
-        </Picker>
-
-        <Button title="Add" onPress={addTransaction} />
-      </View>
-
-      {/* Checkbox */}
-      <Checkbox
-        label="Include archived"
-        checked={includeArchived}
-        onToggle={() => setIncludeArchived(!includeArchived)}
-      />
-
-      {/* LIST */}
-      <FlatList
-        data={transactions}
-        keyExtractor={(item) => item.id.toString()}
-        renderItem={({ item }) => (
-          <View style={styles.item}>
-            <Text>
-              {item.title} - ${item.amount} ({item.transaction_type})
-            </Text>
-            <Text>{item.category}</Text>
-
-            <View style={styles.row}>
-              <Button title="Archive" onPress={() => archiveTransaction(item.id)} />
-              <Button title="Delete" onPress={() => deleteTransaction(item.id)} />
+        {/* Summary Card */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Summary (active only)</Text>
+          <View style={styles.summaryRow}>
+            <View style={styles.summaryBox}>
+              <Text style={styles.summaryLabel}>Income</Text>
+              <Text style={styles.summaryValue}>${summary.income.toFixed(2)}</Text>
+            </View>
+            <View style={styles.summaryBox}>
+              <Text style={styles.summaryLabel}>Expenses</Text>
+              <Text style={styles.summaryValue}>${summary.expense.toFixed(2)}</Text>
+            </View>
+            <View style={styles.summaryBox}>
+              <Text style={styles.summaryLabel}>Balance</Text>
+              <Text style={styles.summaryValue}>${summary.balance.toFixed(2)}</Text>
             </View>
           </View>
-        )}
-      />
-    </View>
+        </View>
+
+        {/* Login Card */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Login (JWT)</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Username"
+            value={username}
+            onChangeText={setUsername}
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Password"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+          />
+          <View style={styles.row}>
+            <PillButton label="Login" onPress={login} />
+            <PillButton
+              label={token ? "Token ✅" : "No Token"}
+              onPress={() => {}}
+              variant="ghost"
+              disabled
+            />
+          </View>
+        </View>
+
+        {/* Add Transaction Card */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Add Transaction</Text>
+
+          <Text style={styles.label}>Title</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="e.g., Lunch"
+            value={title}
+            onChangeText={setTitle}
+          />
+
+          <Text style={styles.label}>Amount</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="e.g., 1200"
+            keyboardType="numeric"
+            value={amount}
+            onChangeText={setAmount}
+          />
+
+          <Text style={styles.label}>Type (Radio)</Text>
+          <RadioRow selected={transactionType} onSelect={setTransactionType} />
+
+          <Text style={styles.label}>Category (Dropdown)</Text>
+          <View style={styles.pickerWrap}>
+            <Picker selectedValue={category} onValueChange={(v) => setCategory(v)}>
+              {CATEGORIES.map((c) => (
+                <Picker.Item key={c} label={c} value={c} />
+              ))}
+            </Picker>
+          </View>
+
+          <PillButton label="Add Transaction" onPress={addTransaction} />
+        </View>
+
+        {/* Filters */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Filters</Text>
+          <View style={styles.filterRow}>
+            <Checkbox value={includeArchived} onValueChange={setIncludeArchived} />
+            <Text style={{ marginLeft: 10 }}>Include archived (Checkbox)</Text>
+          </View>
+          <PillButton label="Refresh" onPress={fetchTransactions} variant="ghost" />
+        </View>
+
+        {/* List */}
+        <Text style={styles.h2}>Transactions</Text>
+        <FlatList
+          scrollEnabled={false}
+          data={transactions}
+          keyExtractor={(item) => String(item.id)}
+          ListEmptyComponent={<Text style={styles.sub}>No transactions yet.</Text>}
+          renderItem={({ item }) => (
+            <View style={styles.item}>
+              <View style={styles.itemTop}>
+                <Text style={styles.itemTitle}>
+                  {item.title} • ${Number(item.amount).toFixed(2)}
+                </Text>
+                <Text style={styles.badge}>{item.transaction_type.toUpperCase()}</Text>
+              </View>
+
+              <Text style={styles.sub}>
+                {item.category} • {item.transaction_date} •{" "}
+                {item.archived ? "ARCHIVED" : "ACTIVE"}
+              </Text>
+
+              <View style={styles.row}>
+                <View style={{ flex: 1 }}>
+                  <PillButton label="Archive" onPress={() => archiveTransaction(item.id)} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <PillButton
+                    label="Delete"
+                    onPress={() => deleteTransaction(item.id)}
+                    variant="danger"
+                  />
+                </View>
+              </View>
+            </View>
+          )}
+        />
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
-/* -------------------- STYLES -------------------- */
-
+/* ------------------ styles ------------------ */
 const styles = StyleSheet.create({
-  container: { padding: 20, paddingTop: 40 },
-  title: { fontSize: 22, fontWeight: "bold", marginBottom: 10 },
-  subtitle: { fontSize: 16, fontWeight: "bold", marginBottom: 8 },
-  card: { borderWidth: 1, padding: 10, marginBottom: 12, borderRadius: 8 },
-  input: { borderWidth: 1, padding: 8, marginBottom: 8, borderRadius: 6 },
-  item: { borderWidth: 1, padding: 10, marginBottom: 8, borderRadius: 6 },
-  row: { flexDirection: "row", gap: 10, marginBottom: 6 },
+  safe: { flex: 1, backgroundColor: "#0b0f14" },
+  container: { padding: 16, paddingBottom: 60 },
+  h1: { fontSize: 26, fontWeight: "800", color: "white" },
+  h2: { fontSize: 18, fontWeight: "800", color: "white", marginTop: 8, marginBottom: 10 },
+  sub: { color: "rgba(255,255,255,0.7)", marginTop: 6 },
 
-  radioRow: { flexDirection: "row", alignItems: "center", marginRight: 10 },
-  radioOuter: {
-    width: 18,
-    height: 18,
-    borderWidth: 2,
-    borderRadius: 9,
-    marginRight: 6,
-    justifyContent: "center",
-    alignItems: "center",
+  card: {
+    backgroundColor: "#121a23",
+    borderRadius: 16,
+    padding: 14,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
   },
-  radioInner: { width: 8, height: 8, borderRadius: 4, backgroundColor: "black" },
+  cardTitle: { color: "white", fontWeight: "800", marginBottom: 10, fontSize: 16 },
 
-  checkboxRow: { flexDirection: "row", alignItems: "center", marginBottom: 10 },
-  checkboxBox: {
-    width: 20,
-    height: 20,
-    borderWidth: 2,
-    marginRight: 8,
-    justifyContent: "center",
-    alignItems: "center",
+  label: { color: "rgba(255,255,255,0.75)", marginTop: 10, marginBottom: 6, fontWeight: "700" },
+
+  input: {
+    backgroundColor: "#0b0f14",
+    borderRadius: 12,
+    padding: 12,
+    color: "white",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
   },
-  checkboxTick: { fontWeight: "bold" },
+
+  pickerWrap: {
+    borderRadius: 12,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+    backgroundColor: "#0b0f14",
+  },
+
+  row: { flexDirection: "row", gap: 10, marginTop: 10 },
+  btn: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+  },
+  btnPrimary: { backgroundColor: "white", borderColor: "white" },
+  btnDanger: { backgroundColor: "#ff4d4d", borderColor: "#ff4d4d" },
+  btnGhost: { backgroundColor: "transparent", borderColor: "rgba(255,255,255,0.2)" },
+  btnText: { fontWeight: "900" },
+  btnTextSolid: { color: "#0b0f14" },
+  btnTextGhost: { color: "rgba(255,255,255,0.85)" },
+
+  radioRow: { flexDirection: "row", gap: 10 },
+  radioChip: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+  },
+  radioChipOn: { backgroundColor: "white", borderColor: "white" },
+  radioText: { color: "rgba(255,255,255,0.85)", fontWeight: "800" },
+  radioTextOn: { color: "#0b0f14" },
+
+  checkboxRow: { flexDirection: "row", alignItems: "center" },
+  checkboxBox: { width: 20, height: 20, borderWidth: 2, alignItems: "center", justifyContent: "center" },
+  checkboxTick: { fontWeight: "900" },
+  filterRow: { flexDirection: "row", alignItems: "center" },
+
+  item: {
+    backgroundColor: "#121a23",
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  itemTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  itemTitle: { color: "white", fontWeight: "900" },
+  badge: {
+    backgroundColor: "rgba(255,255,255,0.12)",
+    color: "white",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    fontWeight: "900",
+    fontSize: 12,
+  },
+
+  summaryRow: { flexDirection: "row", gap: 10 },
+  summaryBox: {
+    flex: 1,
+    backgroundColor: "#0b0f14",
+    borderRadius: 14,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+  },
+  summaryLabel: { color: "rgba(255,255,255,0.75)", fontWeight: "800", fontSize: 12 },
+  summaryValue: { color: "white", fontWeight: "900", marginTop: 6 },
 });
