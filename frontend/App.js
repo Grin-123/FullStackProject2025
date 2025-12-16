@@ -6,7 +6,6 @@ import {
   Pressable,
   FlatList,
   Alert,
-  Platform,
   StyleSheet,
   SafeAreaView,
   ScrollView,
@@ -15,10 +14,17 @@ import axios from "axios";
 import { Picker } from "@react-native-picker/picker";
 import Checkbox from "expo-checkbox";
 
-const API =
-  Platform.OS === "android"
-    ? "http://10.0.2.2:8000"
-    : "http://localhost:8000";
+/**
+ * IMPORTANT (Real phone):
+ * Put your PC's IP address here (same Wi-Fi as your phone).
+ * Example: "http://192.168.0.12:8000"
+ *
+ * How to find your PC IP (Windows):
+ * 1) Open CMD
+ * 2) Run: ipconfig
+ * 3) Look for "IPv4 Address"
+ */
+const API = "http://192.168.0.12:8000"; // <-- CHANGE THIS TO YOUR PC IPv4
 
 const CATEGORIES = ["Food", "Rent", "Transport", "Salary", "Bills", "Other"];
 
@@ -48,7 +54,7 @@ function PillButton({ label, onPress, variant = "primary", disabled }) {
   );
 }
 
-function RadioRow({ value, selected, onSelect }) {
+function RadioRow({ selected, onSelect }) {
   return (
     <View style={styles.radioRow}>
       {["income", "expense"].map((opt) => {
@@ -96,8 +102,11 @@ export default function App() {
         `${API}/transactions?include_archived=${includeArchived}`
       );
       setTransactions(res.data);
-    } catch {
-      Alert.alert("Backend not reachable", `Check API: ${API}\nIs Docker running?`);
+    } catch (err) {
+      Alert.alert(
+        "Backend not reachable",
+        `Could not connect to:\n${API}\n\nFix tips:\n- Make sure Docker backend is running\n- Phone and PC on same Wi-Fi\n- Use your PC IPv4 address\n- Allow port 8000 in Windows Firewall`
+      );
     }
   };
 
@@ -118,7 +127,7 @@ export default function App() {
 
       setToken(res.data.access_token);
       Alert.alert("Logged in", "JWT token saved ✅");
-    } catch {
+    } catch (err) {
       setToken("");
       Alert.alert("Login failed", "Use admin / password");
     }
@@ -145,7 +154,7 @@ export default function App() {
       setTitle("");
       setAmount("");
       fetchTransactions();
-    } catch {
+    } catch (err) {
       Alert.alert("Error", "Could not add transaction");
     }
   };
@@ -153,10 +162,14 @@ export default function App() {
   const archiveTransaction = async (id) => {
     if (!token) return Alert.alert("Auth required", "Login first to archive");
     try {
-      await axios.patch(`${API}/transactions/${id}/archive`, {}, { headers: authHeaders });
+      await axios.patch(
+        `${API}/transactions/${id}/archive`,
+        {},
+        { headers: authHeaders }
+      );
       fetchTransactions();
     } catch {
-      Alert.alert("Error", "Archive failed");
+      Alert.alert("Error", "Archive failed (are you logged in?)");
     }
   };
 
@@ -170,10 +183,12 @@ export default function App() {
         style: "destructive",
         onPress: async () => {
           try {
-            await axios.delete(`${API}/transactions/${id}`, { headers: authHeaders });
+            await axios.delete(`${API}/transactions/${id}`, {
+              headers: authHeaders,
+            });
             fetchTransactions();
           } catch {
-            Alert.alert("Error", "Delete failed");
+            Alert.alert("Error", "Delete failed (are you logged in?)");
           }
         },
       },
@@ -223,12 +238,14 @@ export default function App() {
           <TextInput
             style={styles.input}
             placeholder="Username"
+            placeholderTextColor="rgba(255,255,255,0.5)"
             value={username}
             onChangeText={setUsername}
           />
           <TextInput
             style={styles.input}
             placeholder="Password"
+            placeholderTextColor="rgba(255,255,255,0.5)"
             value={password}
             onChangeText={setPassword}
             secureTextEntry
@@ -252,6 +269,7 @@ export default function App() {
           <TextInput
             style={styles.input}
             placeholder="e.g., Lunch"
+            placeholderTextColor="rgba(255,255,255,0.5)"
             value={title}
             onChangeText={setTitle}
           />
@@ -260,6 +278,7 @@ export default function App() {
           <TextInput
             style={styles.input}
             placeholder="e.g., 1200"
+            placeholderTextColor="rgba(255,255,255,0.5)"
             keyboardType="numeric"
             value={amount}
             onChangeText={setAmount}
@@ -285,7 +304,9 @@ export default function App() {
           <Text style={styles.cardTitle}>Filters</Text>
           <View style={styles.filterRow}>
             <Checkbox value={includeArchived} onValueChange={setIncludeArchived} />
-            <Text style={{ marginLeft: 10 }}>Include archived (Checkbox)</Text>
+            <Text style={{ marginLeft: 10, color: "white" }}>
+              Include archived (Checkbox)
+            </Text>
           </View>
           <PillButton label="Refresh" onPress={fetchTransactions} variant="ghost" />
         </View>
@@ -303,7 +324,9 @@ export default function App() {
                 <Text style={styles.itemTitle}>
                   {item.title} • ${Number(item.amount).toFixed(2)}
                 </Text>
-                <Text style={styles.badge}>{item.transaction_type.toUpperCase()}</Text>
+                <Text style={styles.badge}>
+                  {item.transaction_type.toUpperCase()}
+                </Text>
               </View>
 
               <Text style={styles.sub}>
@@ -313,7 +336,10 @@ export default function App() {
 
               <View style={styles.row}>
                 <View style={{ flex: 1 }}>
-                  <PillButton label="Archive" onPress={() => archiveTransaction(item.id)} />
+                  <PillButton
+                    label="Archive"
+                    onPress={() => archiveTransaction(item.id)}
+                  />
                 </View>
                 <View style={{ flex: 1 }}>
                   <PillButton
@@ -336,7 +362,13 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#0b0f14" },
   container: { padding: 16, paddingBottom: 60 },
   h1: { fontSize: 26, fontWeight: "800", color: "white" },
-  h2: { fontSize: 18, fontWeight: "800", color: "white", marginTop: 8, marginBottom: 10 },
+  h2: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "white",
+    marginTop: 8,
+    marginBottom: 10,
+  },
   sub: { color: "rgba(255,255,255,0.7)", marginTop: 6 },
 
   card: {
@@ -349,7 +381,12 @@ const styles = StyleSheet.create({
   },
   cardTitle: { color: "white", fontWeight: "800", marginBottom: 10, fontSize: 16 },
 
-  label: { color: "rgba(255,255,255,0.75)", marginTop: 10, marginBottom: 6, fontWeight: "700" },
+  label: {
+    color: "rgba(255,255,255,0.75)",
+    marginTop: 10,
+    marginBottom: 6,
+    fontWeight: "700",
+  },
 
   input: {
     backgroundColor: "#0b0f14",
@@ -358,6 +395,7 @@ const styles = StyleSheet.create({
     color: "white",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.10)",
+    marginBottom: 8,
   },
 
   pickerWrap: {
@@ -369,6 +407,7 @@ const styles = StyleSheet.create({
   },
 
   row: { flexDirection: "row", gap: 10, marginTop: 10 },
+
   btn: {
     paddingVertical: 12,
     paddingHorizontal: 14,
@@ -396,9 +435,6 @@ const styles = StyleSheet.create({
   radioText: { color: "rgba(255,255,255,0.85)", fontWeight: "800" },
   radioTextOn: { color: "#0b0f14" },
 
-  checkboxRow: { flexDirection: "row", alignItems: "center" },
-  checkboxBox: { width: 20, height: 20, borderWidth: 2, alignItems: "center", justifyContent: "center" },
-  checkboxTick: { fontWeight: "900" },
   filterRow: { flexDirection: "row", alignItems: "center" },
 
   item: {
