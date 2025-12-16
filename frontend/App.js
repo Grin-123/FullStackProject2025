@@ -24,7 +24,7 @@ import Checkbox from "expo-checkbox";
  * 2) Run: ipconfig
  * 3) Look for "IPv4 Address"
  */
-const API = "http://192.168.0.12:8000"; // <-- CHANGE THIS TO YOUR PC IPv4
+const API = "http://localhost:8000";
 
 const CATEGORIES = ["Food", "Rent", "Transport", "Salary", "Bills", "Other"];
 
